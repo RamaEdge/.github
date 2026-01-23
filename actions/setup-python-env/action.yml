@@ -1,0 +1,63 @@
+name: 'Setup Python Environment'
+description: 'Set up Python with pip and common development dependencies'
+
+inputs:
+  python-version:
+    description: 'Python version to use'
+    default: '3.12'
+  install-dev:
+    description: 'Install dev dependencies from pyproject.toml'
+    default: 'true'
+  extra-packages:
+    description: 'Additional packages to install (space-separated)'
+    default: ''
+  editable-paths:
+    description: 'Paths to install in editable mode (space-separated)'
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Upgrade pip and install build tools
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+
+    - name: Install editable packages
+      if: ${{ inputs.editable-paths != '' }}
+      shell: bash
+      run: |
+        for path in ${{ inputs.editable-paths }}; do
+          echo "Installing $path in editable mode..."
+          pip install -e "$path"
+        done
+
+    - name: Install dev dependencies
+      if: ${{ inputs.install-dev == 'true' }}
+      shell: bash
+      run: |
+        if [ -f pyproject.toml ]; then
+          pip install -e .[dev]
+        elif [ -f requirements-dev.txt ]; then
+          pip install -r requirements-dev.txt
+        elif [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
+
+    - name: Install extra packages
+      if: ${{ inputs.extra-packages != '' }}
+      shell: bash
+      run: |
+        pip install ${{ inputs.extra-packages }}
+
+    - name: Display Python and pip versions
+      shell: bash
+      run: |
+        python --version
+        pip --version
+        pip list

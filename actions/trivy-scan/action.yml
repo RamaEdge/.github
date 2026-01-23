@@ -1,0 +1,66 @@
+name: 'Trivy Container Scan'
+description: 'Install Trivy and scan container images, upload results to GitHub Advanced Security'
+
+inputs:
+  images:
+    description: 'Space-separated list of images to scan'
+    required: true
+  severity:
+    description: 'Severity levels to report (comma-separated)'
+    default: 'CRITICAL,HIGH'
+  output-dir:
+    description: 'Directory to store SARIF results'
+    default: 'trivy-results'
+  upload-to-ghas:
+    description: 'Upload results to GitHub Advanced Security'
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Trivy
+      shell: bash
+      run: |
+        # Install Trivy from binary (works on any Linux system)
+        TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "x86_64" ]; then
+          ARCH_SUFFIX="64bit"
+        elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+          ARCH_SUFFIX="ARM64"
+        else
+          ARCH_SUFFIX="64bit"  # Default fallback
+        fi
+        wget -qO- "https://github.com/aquasecurity/trivy/releases/download/${TRIVY_VERSION}/trivy_${TRIVY_VERSION#v}_Linux-${ARCH_SUFFIX}.tar.gz" | tar -xz
+        sudo mv trivy /usr/local/bin/trivy
+        sudo chmod +x /usr/local/bin/trivy
+        trivy --version
+
+    - name: Run Trivy vulnerability scanner
+      shell: bash
+      run: |
+        mkdir -p ${{ inputs.output-dir }}
+        for image in ${{ inputs.images }}; do
+          # Create a safe filename from the image name
+          safe_name=$(echo "$image" | sed 's/[^a-zA-Z0-9]/_/g')
+          
+          echo "Scanning $image with Trivy..."
+          if trivy image \
+            --format sarif \
+            --output "${{ inputs.output-dir }}/${safe_name}.sarif" \
+            --severity ${{ inputs.severity }} \
+            "$image"; then
+            echo "✓ Scan completed for $image"
+          else
+            echo "⚠ Scan failed for $image, creating empty SARIF..."
+            # Create empty SARIF file to avoid upload errors
+            echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > "${{ inputs.output-dir }}/${safe_name}.sarif"
+          fi
+        done
+
+    - name: Upload Trivy results to GitHub Security
+      if: ${{ inputs.upload-to-ghas == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output-dir }}
+        category: container-security

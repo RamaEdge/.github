@@ -1,0 +1,160 @@
+name: Reusable Container Build
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        description: 'Container registry path (e.g., harbor.example.com/project)'
+        type: string
+        required: true
+      registry-host:
+        description: 'Container registry host for login (e.g., harbor.example.com)'
+        type: string
+        required: true
+      services:
+        description: 'Space-separated list of services to build (directory names under services/)'
+        type: string
+        required: true
+      containerfile-path:
+        description: 'Path pattern to Containerfile (use {service} as placeholder)'
+        type: string
+        default: 'services/{service}/Containerfile'
+      build-context:
+        description: 'Build context directory'
+        type: string
+        default: '.'
+      trivy-severity:
+        description: 'Trivy severity levels to scan'
+        type: string
+        default: 'CRITICAL,HIGH'
+      push-on-tag:
+        description: 'Push images when triggered by a tag'
+        type: boolean
+        default: true
+    secrets:
+      REGISTRY_USERNAME:
+        required: true
+      REGISTRY_PASSWORD:
+        required: true
+
+jobs:
+  build-and-scan:
+    name: Build and Scan Containers
+    runs-on: arc-runner-set
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
+            # Use tag version (keep 'v' prefix)
+            VERSION="${{ github.ref_name }}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_tag=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # Use PR number and short SHA for PRs
+            VERSION="pr-${{ github.event.pull_request.number }}-${GITHUB_SHA::8}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_tag=false" >> $GITHUB_OUTPUT
+          else
+            # Workflow dispatch or other - use short SHA
+            VERSION="dev-${GITHUB_SHA::8}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_tag=false" >> $GITHUB_OUTPUT
+          fi
+          echo "Version: $VERSION"
+
+      - name: Log in to Container Registry
+        if: steps.version.outputs.is_tag == 'true' && inputs.push-on-tag
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | podman login -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin ${{ inputs.registry-host }}
+
+      - name: Build containers
+        id: build
+        run: |
+          IMAGES=""
+          for service in ${{ inputs.services }}; do
+            image_name=$(echo $service | tr '_' '-')
+            full_image="${{ inputs.registry }}/$image_name:${{ steps.version.outputs.version }}"
+            containerfile=$(echo "${{ inputs.containerfile-path }}" | sed "s/{service}/$service/g")
+            
+            echo "Building $service from $containerfile..."
+            podman build \
+              -f "$containerfile" \
+              -t "$full_image" \
+              ${{ inputs.build-context }}
+            
+            # Also tag as latest if this is a tag push
+            if [[ "${{ steps.version.outputs.is_tag }}" == "true" ]]; then
+              podman tag "$full_image" "${{ inputs.registry }}/$image_name:latest"
+            fi
+            
+            IMAGES="$IMAGES $full_image"
+          done
+          echo "images=$IMAGES" >> $GITHUB_OUTPUT
+
+      - name: Install Trivy
+        run: |
+          # Install Trivy from binary (works on any Linux system)
+          TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            ARCH_SUFFIX="64bit"
+          elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+            ARCH_SUFFIX="ARM64"
+          else
+            ARCH_SUFFIX="64bit"  # Default fallback
+          fi
+          wget -qO- "https://github.com/aquasecurity/trivy/releases/download/${TRIVY_VERSION}/trivy_${TRIVY_VERSION#v}_Linux-${ARCH_SUFFIX}.tar.gz" | tar -xz
+          sudo mv trivy /usr/local/bin/trivy
+          sudo chmod +x /usr/local/bin/trivy
+          trivy --version
+
+      - name: Run Trivy vulnerability scanner
+        run: |
+          mkdir -p trivy-results
+          for service in ${{ inputs.services }}; do
+            image_name=$(echo $service | tr '_' '-')
+            full_image="${{ inputs.registry }}/$image_name:${{ steps.version.outputs.version }}"
+            
+            echo "Scanning $service with Trivy..."
+            if trivy image \
+              --format sarif \
+              --output "trivy-results/$service.sarif" \
+              --severity ${{ inputs.trivy-severity }} \
+              "$full_image"; then
+              echo "✓ Scan completed for $service"
+            else
+              echo "⚠ Scan failed for $service, creating empty SARIF..."
+              echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > "trivy-results/$service.sarif"
+            fi
+          done
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results
+          category: container-security
+
+      - name: Push container images
+        if: steps.version.outputs.is_tag == 'true' && inputs.push-on-tag
+        run: |
+          for service in ${{ inputs.services }}; do
+            image_name=$(echo $service | tr '_' '-')
+            versioned_image="${{ inputs.registry }}/$image_name:${{ steps.version.outputs.version }}"
+            latest_image="${{ inputs.registry }}/$image_name:latest"
+            
+            echo "Pushing $versioned_image..."
+            podman push "$versioned_image"
+            
+            echo "Pushing $latest_image..."
+            podman push "$latest_image"
+          done

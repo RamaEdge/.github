@@ -1,0 +1,105 @@
+name: Reusable Python CI
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version to use'
+        type: string
+        default: '3.12'
+      test-path:
+        description: 'Path to test directory'
+        type: string
+        required: true
+      lint-path:
+        description: 'Path to lint (defaults to test-path)'
+        type: string
+        default: ''
+      coverage-threshold:
+        description: 'Minimum coverage percentage required'
+        type: number
+        default: 80
+      editable-paths:
+        description: 'Space-separated paths to install in editable mode'
+        type: string
+        default: ''
+      pythonpath:
+        description: 'Additional PYTHONPATH to set'
+        type: string
+        default: ''
+      run-lint:
+        description: 'Whether to run linting'
+        type: boolean
+        default: true
+      run-tests:
+        description: 'Whether to run tests'
+        type: boolean
+        default: true
+
+jobs:
+  lint-and-test:
+    name: Lint and Test Python
+    runs-on: arc-runner-set
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ inputs.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Upgrade pip and install build tools
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install editable packages
+        if: inputs.editable-paths != ''
+        run: |
+          for path in ${{ inputs.editable-paths }}; do
+            echo "Installing $path in editable mode..."
+            pip install -e "$path"
+          done
+
+      - name: Install dev dependencies
+        run: |
+          if [ -f pyproject.toml ]; then
+            pip install -e .[dev]
+          elif [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Run lint
+        if: inputs.run-lint
+        run: |
+          LINT_PATH="${{ inputs.lint-path }}"
+          if [ -z "$LINT_PATH" ]; then
+            LINT_PATH="${{ inputs.test-path }}"
+          fi
+          python -m ruff check "$LINT_PATH"
+
+      - name: Run tests with coverage
+        if: inputs.run-tests
+        run: |
+          PYTHONPATH_VAR="${{ inputs.pythonpath }}"
+          if [ -n "$PYTHONPATH_VAR" ]; then
+            export PYTHONPATH="$PYTHONPATH_VAR:$PYTHONPATH"
+          fi
+          pytest ${{ inputs.test-path }} \
+            --cov=${{ inputs.test-path }} \
+            --cov-report=term-missing \
+            --cov-report=html \
+            --cov-fail-under=${{ inputs.coverage-threshold }}
+
+      - name: Upload coverage report
+        if: inputs.run-tests && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ inputs.test-path }}
+          path: htmlcov/
+          retention-days: 7
