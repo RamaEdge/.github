@@ -56,16 +56,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y podman
           
-          # Configure Podman storage (vfs works reliably in containers)
-          mkdir -p ~/.config/containers
-          cat > ~/.config/containers/storage.conf << 'EOF'
+          # Configure Podman storage for root (vfs works reliably in containers)
+          sudo mkdir -p /etc/containers
+          sudo tee /etc/containers/storage.conf > /dev/null << 'EOF'
           [storage]
           driver = "vfs"
+          runroot = "/run/containers/storage"
+          graphroot = "/var/lib/containers/storage"
           EOF
           
-          # Configure registries (allow insecure for private registries if needed)
-          mkdir -p ~/.config/containers
-          cat > ~/.config/containers/registries.conf << 'EOF'
+          # Configure registries
+          sudo tee /etc/containers/registries.conf > /dev/null << 'EOF'
           [registries.search]
           registries = ['docker.io']
           
@@ -73,8 +74,8 @@ jobs:
           registries = []
           EOF
           
-          podman --version
-          podman info --format '{{.Store.GraphDriverName}}'
+          sudo podman --version
+          sudo podman info --format '{{.Store.GraphDriverName}}'
 
       - name: Determine version
         id: version
@@ -101,7 +102,7 @@ jobs:
         run: |
           if [[ -n "${{ secrets.REGISTRY_USERNAME }}" && -n "${{ secrets.REGISTRY_PASSWORD }}" ]]; then
             echo "Logging in to ${{ inputs.registry-host }}..."
-            echo "${{ secrets.REGISTRY_PASSWORD }}" | podman login \
+            echo "${{ secrets.REGISTRY_PASSWORD }}" | sudo podman login \
               --username "${{ secrets.REGISTRY_USERNAME }}" \
               --password-stdin \
               "${{ inputs.registry-host }}"
@@ -120,14 +121,14 @@ jobs:
             containerfile=$(echo "${{ inputs.containerfile-path }}" | sed "s/{service}/$service/g")
             
             echo "Building $service from $containerfile..."
-            podman build \
+            sudo podman build \
               -f "$containerfile" \
               -t "$full_image" \
               ${{ inputs.build-context }}
             
             # Also tag as latest if this is a tag push
             if [[ "${{ steps.version.outputs.is_tag }}" == "true" ]]; then
-              podman tag "$full_image" "${{ inputs.registry }}/$image_name:latest"
+              sudo podman tag "$full_image" "${{ inputs.registry }}/$image_name:latest"
             fi
             
             IMAGES="$IMAGES $full_image"
@@ -159,7 +160,8 @@ jobs:
             full_image="${{ inputs.registry }}/$image_name:${{ steps.version.outputs.version }}"
             
             echo "Scanning $service with Trivy..."
-            if trivy image \
+            # Use sudo to access root's podman storage
+            if sudo trivy image \
               --format sarif \
               --output "trivy-results/$service.sarif" \
               --severity ${{ inputs.trivy-severity }} \
@@ -170,6 +172,8 @@ jobs:
               echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > "trivy-results/$service.sarif"
             fi
           done
+          # Fix permissions for upload
+          sudo chown -R $(id -u):$(id -g) trivy-results/
 
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
@@ -192,8 +196,8 @@ jobs:
             latest_image="${{ inputs.registry }}/$image_name:latest"
             
             echo "Pushing $versioned_image..."
-            podman push "$versioned_image"
+            sudo podman push "$versioned_image"
             
             echo "Pushing $latest_image..."
-            podman push "$latest_image"
+            sudo podman push "$latest_image"
           done
