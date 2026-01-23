@@ -179,8 +179,13 @@ jobs:
           category: container-security
 
       - name: Push container images
-        if: steps.version.outputs.is_tag == 'true' && inputs.push-on-tag && secrets.REGISTRY_USERNAME != ''
+        if: steps.version.outputs.is_tag == 'true' && inputs.push-on-tag
         run: |
+          if [[ -z "${{ secrets.REGISTRY_USERNAME }}" ]]; then
+            echo "⚠ Registry credentials not provided, skipping push"
+            exit 0
+          fi
+          
           for service in ${{ inputs.services }}; do
             image_name=$(echo $service | tr '_' '-')
             versioned_image="${{ inputs.registry }}/$image_name:${{ steps.version.outputs.version }}"
