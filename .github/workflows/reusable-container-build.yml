@@ -33,9 +33,9 @@ on:
         default: true
     secrets:
       REGISTRY_USERNAME:
-        required: true
+        required: false
       REGISTRY_PASSWORD:
-        required: true
+        required: false
 
 jobs:
   build-and-scan:
@@ -49,6 +49,32 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install and configure Podman
+        run: |
+          # Install Podman on Ubuntu-based runners
+          sudo apt-get update
+          sudo apt-get install -y podman
+          
+          # Configure Podman storage (vfs works reliably in containers)
+          mkdir -p ~/.config/containers
+          cat > ~/.config/containers/storage.conf << 'EOF'
+          [storage]
+          driver = "vfs"
+          EOF
+          
+          # Configure registries (allow insecure for private registries if needed)
+          mkdir -p ~/.config/containers
+          cat > ~/.config/containers/registries.conf << 'EOF'
+          [registries.search]
+          registries = ['docker.io']
+          
+          [registries.insecure]
+          registries = []
+          EOF
+          
+          podman --version
+          podman info --format '{{.Store.GraphDriverName}}'
 
       - name: Determine version
         id: version
@@ -72,9 +98,17 @@ jobs:
           echo "Version: $VERSION"
 
       - name: Log in to Container Registry
-        if: steps.version.outputs.is_tag == 'true' && inputs.push-on-tag
         run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" | podman login -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin ${{ inputs.registry-host }}
+          if [[ -n "${{ secrets.REGISTRY_USERNAME }}" && -n "${{ secrets.REGISTRY_PASSWORD }}" ]]; then
+            echo "Logging in to ${{ inputs.registry-host }}..."
+            echo "${{ secrets.REGISTRY_PASSWORD }}" | podman login \
+              --username "${{ secrets.REGISTRY_USERNAME }}" \
+              --password-stdin \
+              "${{ inputs.registry-host }}"
+            echo "✓ Login successful"
+          else
+            echo "⚠ Registry credentials not provided, skipping login"
+          fi
 
       - name: Build containers
         id: build
@@ -145,7 +179,7 @@ jobs:
           category: container-security
 
       - name: Push container images
-        if: steps.version.outputs.is_tag == 'true' && inputs.push-on-tag
+        if: steps.version.outputs.is_tag == 'true' && inputs.push-on-tag && secrets.REGISTRY_USERNAME != ''
         run: |
           for service in ${{ inputs.services }}; do
             image_name=$(echo $service | tr '_' '-')
