@@ -99,11 +99,14 @@ jobs:
           echo "Version: $VERSION"
 
       - name: Log in to Container Registry
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          if [[ -n "${{ secrets.REGISTRY_USERNAME }}" && -n "${{ secrets.REGISTRY_PASSWORD }}" ]]; then
+          if [[ -n "$REGISTRY_USERNAME" && -n "$REGISTRY_PASSWORD" ]]; then
             echo "Logging in to ${{ inputs.registry-host }}..."
-            echo "${{ secrets.REGISTRY_PASSWORD }}" | sudo podman login \
-              --username "${{ secrets.REGISTRY_USERNAME }}" \
+            printf '%s' "$REGISTRY_PASSWORD" | sudo podman login \
+              --username "$REGISTRY_USERNAME" \
               --password-stdin \
               "${{ inputs.registry-host }}"
             echo "✓ Login successful"
@@ -184,8 +187,10 @@ jobs:
 
       - name: Push container images
         if: steps.version.outputs.is_tag == 'true' && inputs.push-on-tag
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
         run: |
-          if [[ -z "${{ secrets.REGISTRY_USERNAME }}" ]]; then
+          if [[ -z "$REGISTRY_USERNAME" ]]; then
             echo "⚠ Registry credentials not provided, skipping push"
             exit 0
           fi
