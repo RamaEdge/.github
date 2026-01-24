@@ -8,11 +8,23 @@ on:
         type: string
         default: '3.12'
       test-path:
-        description: 'Path to test directory'
+        description: 'Path to test directory (deprecated: use test-paths)'
         type: string
-        required: true
+        default: ''
+      test-paths:
+        description: 'Space-separated paths to test'
+        type: string
+        default: ''
       lint-path:
-        description: 'Path to lint (defaults to test-path)'
+        description: 'Path to lint (deprecated: use lint-paths)'
+        type: string
+        default: ''
+      lint-paths:
+        description: 'Space-separated paths to lint (defaults to tests)'
+        type: string
+        default: ''
+      cov-paths:
+        description: 'Space-separated paths to measure coverage (defaults to tests)'
         type: string
         default: ''
       coverage-threshold:
@@ -77,11 +89,23 @@ jobs:
       - name: Run lint
         if: inputs.run-lint
         run: |
-          LINT_PATH="${{ inputs.lint-path }}"
-          if [ -z "$LINT_PATH" ]; then
-            LINT_PATH="${{ inputs.test-path }}"
+          TEST_PATHS="${{ inputs.test-paths }}"
+          if [ -z "$TEST_PATHS" ]; then
+            TEST_PATHS="${{ inputs.test-path }}"
           fi
-          python -m ruff check "$LINT_PATH"
+          if [ -z "$TEST_PATHS" ]; then
+            echo "No test paths provided. Set test-paths or test-path." >&2
+            exit 1
+          fi
+
+          LINT_PATHS="${{ inputs.lint-paths }}"
+          if [ -z "$LINT_PATHS" ]; then
+            LINT_PATHS="${{ inputs.lint-path }}"
+          fi
+          if [ -z "$LINT_PATHS" ]; then
+            LINT_PATHS="$TEST_PATHS"
+          fi
+          python -m ruff check $LINT_PATHS
 
       - name: Run tests with coverage
         if: inputs.run-tests
@@ -90,8 +114,25 @@ jobs:
           if [ -n "$PYTHONPATH_VAR" ]; then
             export PYTHONPATH="$PYTHONPATH_VAR:$PYTHONPATH"
           fi
-          pytest ${{ inputs.test-path }} \
-            --cov=${{ inputs.test-path }} \
+          TEST_PATHS="${{ inputs.test-paths }}"
+          if [ -z "$TEST_PATHS" ]; then
+            TEST_PATHS="${{ inputs.test-path }}"
+          fi
+          if [ -z "$TEST_PATHS" ]; then
+            echo "No test paths provided. Set test-paths or test-path." >&2
+            exit 1
+          fi
+
+          COV_PATHS="${{ inputs.cov-paths }}"
+          if [ -z "$COV_PATHS" ]; then
+            COV_PATHS="$TEST_PATHS"
+          fi
+          COV_ARGS=""
+          for path in $COV_PATHS; do
+            COV_ARGS="$COV_ARGS --cov=$path"
+          done
+
+          pytest $TEST_PATHS $COV_ARGS \
             --cov-report=term-missing \
             --cov-report=html \
             --cov-fail-under=${{ inputs.coverage-threshold }}
@@ -100,6 +141,6 @@ jobs:
         if: inputs.run-tests && always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report-${{ inputs.test-path }}
+          name: coverage-report-${{ inputs.test-paths || inputs.test-path }}
           path: htmlcov/
           retention-days: 7

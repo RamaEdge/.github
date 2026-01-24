@@ -96,7 +96,7 @@ jobs:
   test:
     uses: ramaedge/.github/.github/workflows/reusable-python-ci.yml@main
     with:
-      test-path: 'src/'
+      test-paths: 'src/'
       coverage-threshold: 80
       editable-paths: 'libs/common'
 ```
@@ -105,8 +105,11 @@ jobs:
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
 | `python-version` | Python version to use | No | `3.12` |
-| `test-path` | Path to test directory | Yes | - |
-| `lint-path` | Path to lint (defaults to test-path) | No | - |
+| `test-path` | Path to test directory (deprecated) | No | - |
+| `test-paths` | Space-separated paths to test | No | - |
+| `lint-path` | Path to lint (deprecated) | No | - |
+| `lint-paths` | Space-separated paths to lint (defaults to tests) | No | - |
+| `cov-paths` | Space-separated paths for coverage (defaults to tests) | No | - |
 | `coverage-threshold` | Minimum coverage percentage | No | `80` |
 | `editable-paths` | Paths to install in editable mode | No | - |
 | `pythonpath` | Additional PYTHONPATH to set | No | - |
