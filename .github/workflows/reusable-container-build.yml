@@ -54,32 +54,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install and configure Podman
+      - name: Verify runner tooling
         run: |
-          # Install Podman on Ubuntu-based runners
-          sudo apt-get update
-          sudo apt-get install -y podman
-          
-          # Configure Podman storage for root (vfs works reliably in containers)
-          sudo mkdir -p /etc/containers
-          sudo tee /etc/containers/storage.conf > /dev/null << 'EOF'
-          [storage]
-          driver = "vfs"
-          runroot = "/run/containers/storage"
-          graphroot = "/var/lib/containers/storage"
-          EOF
-          
-          # Configure registries
-          sudo tee /etc/containers/registries.conf > /dev/null << 'EOF'
-          [registries.search]
-          registries = ['docker.io']
-          
-          [registries.insecure]
-          registries = []
-          EOF
-          
           sudo podman --version
           sudo podman info --format '{{.Store.GraphDriverName}}'
+          trivy --version
 
       - name: Determine version
         id: version
@@ -153,23 +132,6 @@ jobs:
             IMAGES="$IMAGES $full_image"
           done
           echo "images=$IMAGES" >> $GITHUB_OUTPUT
-
-      - name: Install Trivy
-        run: |
-          # Install Trivy from binary (works on any Linux system)
-          TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-          ARCH=$(uname -m)
-          if [ "$ARCH" = "x86_64" ]; then
-            ARCH_SUFFIX="64bit"
-          elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-            ARCH_SUFFIX="ARM64"
-          else
-            ARCH_SUFFIX="64bit"  # Default fallback
-          fi
-          wget -qO- "https://github.com/aquasecurity/trivy/releases/download/${TRIVY_VERSION}/trivy_${TRIVY_VERSION#v}_Linux-${ARCH_SUFFIX}.tar.gz" | tar -xz
-          sudo mv trivy /usr/local/bin/trivy
-          sudo chmod +x /usr/local/bin/trivy
-          trivy --version
 
       - name: Run Trivy vulnerability scanner
         run: |
