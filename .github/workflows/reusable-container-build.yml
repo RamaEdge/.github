@@ -124,7 +124,7 @@ jobs:
             containerfile=$(echo "${{ inputs.containerfile-path }}" | sed "s/{service}/$service/g")
             
             echo "Building $service from $containerfile..."
-            sudo podman build \
+            sudo podman build --isolation=chroot \
               -f "$containerfile" \
               -t "$full_image" \
               ${{ inputs.build-context }}
