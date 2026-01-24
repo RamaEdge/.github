@@ -11,10 +11,14 @@ on:
         description: 'Container registry host for login (e.g., harbor.example.com)'
         type: string
         required: true
+      service:
+        description: 'Single service to build (directory name under services/)'
+        type: string
+        required: false
       services:
         description: 'Space-separated list of services to build (directory names under services/)'
         type: string
-        required: true
+        required: false
       containerfile-path:
         description: 'Path pattern to Containerfile (use {service} as placeholder)'
         type: string
@@ -118,7 +122,19 @@ jobs:
         id: build
         run: |
           IMAGES=""
-          for service in ${{ inputs.services }}; do
+          services_list=()
+          if [[ -n "${{ inputs.service }}" ]]; then
+            services_list=("${{ inputs.service }}")
+          elif [[ -n "${{ inputs.services }}" ]]; then
+            read -r -a services_list <<< "${{ inputs.services }}"
+          fi
+
+          if [[ ${#services_list[@]} -eq 0 ]]; then
+            echo "No services specified. Provide 'service' or 'services' input."
+            exit 1
+          fi
+
+          for service in "${services_list[@]}"; do
             image_name=$(echo $service | tr '_' '-')
             full_image="${{ inputs.registry }}/$image_name:${{ steps.version.outputs.version }}"
             containerfile=$(echo "${{ inputs.containerfile-path }}" | sed "s/{service}/$service/g")
@@ -158,7 +174,14 @@ jobs:
       - name: Run Trivy vulnerability scanner
         run: |
           mkdir -p trivy-results
-          for service in ${{ inputs.services }}; do
+          services_list=()
+          if [[ -n "${{ inputs.service }}" ]]; then
+            services_list=("${{ inputs.service }}")
+          elif [[ -n "${{ inputs.services }}" ]]; then
+            read -r -a services_list <<< "${{ inputs.services }}"
+          fi
+
+          for service in "${services_list[@]}"; do
             image_name=$(echo $service | tr '_' '-')
             full_image="${{ inputs.registry }}/$image_name:${{ steps.version.outputs.version }}"
             
@@ -195,7 +218,14 @@ jobs:
             exit 0
           fi
           
-          for service in ${{ inputs.services }}; do
+          services_list=()
+          if [[ -n "${{ inputs.service }}" ]]; then
+            services_list=("${{ inputs.service }}")
+          elif [[ -n "${{ inputs.services }}" ]]; then
+            read -r -a services_list <<< "${{ inputs.services }}"
+          fi
+
+          for service in "${services_list[@]}"; do
             image_name=$(echo $service | tr '_' '-')
             versioned_image="${{ inputs.registry }}/$image_name:${{ steps.version.outputs.version }}"
             latest_image="${{ inputs.registry }}/$image_name:latest"
