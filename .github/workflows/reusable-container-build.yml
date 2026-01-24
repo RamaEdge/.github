@@ -148,17 +148,19 @@ jobs:
             full_image="${{ inputs.registry }}/$image_name:${{ steps.version.outputs.version }}"
             
             echo "Scanning $service with Trivy..."
-            # Use sudo to access root's podman storage
+            image_tar="/tmp/${service}.tar"
+            sudo podman save "$full_image" -o "$image_tar"
             if sudo trivy image \
+              --input "$image_tar" \
               --format sarif \
               --output "trivy-results/$service.sarif" \
-              --severity ${{ inputs.trivy-severity }} \
-              "$full_image"; then
+              --severity ${{ inputs.trivy-severity }}; then
               echo "✓ Scan completed for $service"
             else
               echo "⚠ Scan failed for $service, creating empty SARIF..."
               echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > "trivy-results/$service.sarif"
             fi
+            sudo rm -f "$image_tar"
           done
           # Fix permissions for upload
           sudo chown -R $(id -u):$(id -g) trivy-results/
