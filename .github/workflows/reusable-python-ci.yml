@@ -137,10 +137,10 @@ jobs:
             --cov-report=html \
             --cov-fail-under=${{ inputs.coverage-threshold }}
 
-      - name: Upload coverage report
-        if: inputs.run-tests && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-${{ inputs.test-paths || inputs.test-path }}
-          path: htmlcov/
-          retention-days: 7
+      #- name: Upload coverage report
+      #  if: inputs.run-tests && always()
+      #  uses: actions/upload-artifact@v4
+      #  with:
+      #    name: coverage-report-${{ inputs.test-paths || inputs.test-path }}
+      #    path: htmlcov/
+      #    retention-days: 7
