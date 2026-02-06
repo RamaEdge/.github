@@ -166,12 +166,12 @@ jobs:
           # Fix permissions for upload
           sudo chown -R $(id -u):$(id -g) trivy-results/
 
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-results
-          category: container-security
+      #- name: Upload Trivy results to GitHub Security
+      #  uses: github/codeql-action/upload-sarif@v3
+      #  if: always()
+      #  with:
+      #    sarif_file: trivy-results
+      #    category: container-security
 
       - name: Push container images
         if: steps.version.outputs.is_tag == 'true' && inputs.push-on-tag
