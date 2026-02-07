@@ -47,6 +47,10 @@ on:
         description: 'Whether to run tests'
         type: boolean
         default: true
+      extra-index-url:
+        description: 'Extra PyPI index URL for private packages'
+        type: string
+        default: ''
 
 jobs:
   lint-and-test:
@@ -54,6 +58,8 @@ jobs:
     runs-on: arc-runner-set
     permissions:
       contents: read
+    env:
+      PIP_EXTRA_INDEX_URL: ${{ inputs.extra-index-url }}
 
     steps:
       - name: Checkout code
